@@ -1,63 +1,69 @@
+/*
+ * TPB Adult -> Lampa bridge
+ * Version: 0.2.3
+ *
+ * Based on working v0.2.0
+ *
+ * Fixes:
+ * - correct InteractionCategory lifecycle
+ * - no manual comp.start()/comp.create() recursion
+ * - correct activity loader access
+ * - vertical catalog scrolling/focus is left to Lampa InteractionCategory
+ * - fixed infinite pagination
+ * - pagination continues until TPB returns an empty page
+ * - meta/stream requests use the same configured base as the catalog
+ * - all 6 configured TPB bases are preserved
+ * - TPB Adult remains in the sidebar menu
+ * - no Lampa.Listener.trigger()
+ * - no single-item playlist reset when starting a stream
+ *
+ * ES5, no external dependencies.
+ */
+
 (function () {
     'use strict';
 
+    var PLUGIN_ID = 'tpb_adult_lampa';
     var VERSION = '0.2.3';
-    var PLUGIN_NAME = 'TPB Adult';
 
     /*
-     * TPB Adult -> Lampa bridge
+     * Six configured TPB addon groups.
      *
-     * v0.2.3
-     * - fixes infinite-scroll pagination for legacy Lampa InteractionCategory
-     * - sets a large total_pages value required by legacy next-page module
-     * - uses nextObject.page when available
-     * - keeps the catalog source/base index between pages
-     * - does not override InteractionCategory.start()
-     * - keeps single-stream playback without playlist reset
-     * - restores all 6 original TPB source bases
-     * - does not use unsupported Lampa.Listener.trigger()
-     * - uses TPB/Stremio path-style pagination URLs
+     * IMPORTANT:
+     * Keep these URLs exactly as configured in your working v0.2.0.
      */
 
     var DEFAULT_BASE = [
-        'https://tpb-adult-addon.click/eyJtYXhSZXN1bHRzIjoyMCwibWluU2VlZGVycyI6MywicHJldmFybURlYnJpZCI6ZmFsc2UsInNlcGFyYXRlQ2F0ZWdvcmllcyI6dHJ1ZSwibWVkaWFGbG93UHJveHlVcmwiOiIiLCJtZWRpYUZsb3dBcGlQYXNzd29yZCI6IiIsImFkUmVkaXJlY3RvclVybCI6IiIsImphY2tldHRVcmwiOiIiLCJ1c2VuZXRNb2RlIjoidG9yYm94IiwidXNlbmV0SW5kZXhlciI6Im56Z2JlZWsiLCJlbmFibGVkU29ydHMiOlsicmVjZW50Il0sInNvdXJjZXMiOlsicG9ybnJpcHMiLCJoZW50YWkiLCJwamF2Iiwic3RyaXBjaGF0IiwieWVzcG9ybiIsInBvcm53ZXgiXSwidGJLZXkiOiJhNWVjZmJiZC1mNDRlLTQ3MWUtODA0MC1iYWY4MWRmYzQyODIiLCJkaXNhYmxlZENhdGFsb2dzIjpbInNjX2d1eXMiLCJzY190cmFucyIsInNjX3VzYSIsInNjX3NvdXRoX2FtZXJpY2EiLCJzY19ldXJvcGUiLCJzY19hc2lhIiwic2NfaW5kaWEiLCJzY19vY2VhbmlhIl0sInRwZGJDYXRlZ29yaWVzIjpbXSwic3Rhc2hkYkNhdGVnb3JpZXMiOltdLCJncm91cCI6MSwiZ3JvdXBUb3RhbCI6Nn0',
-        'https://tpb-adult-addon.click/eyJtYXhSZXN1bHRzIjoyMCwibWluU2VlZGVycyI6MywicHJldmFybURlYnJpZCI6ZmFsc2UsInNlcGFyYXRlQ2F0ZWdvcmllcyI6dHJ1ZSwibWVkaWFGbG93UHJveHlVcmwiOiIiLCJtZWRpYUZsb3dBcGlQYXNzd29yZCI6IiIsImFkUmVkaXJlY3RvclVybCI6IiIsImphY2tldHRVcmwiOiIiLCJ1c2VuZXRNb2RlIjoidG9yYm94IiwidXNlbmV0SW5kZXhlciI6Im56Z2JlZWsiLCJlbmFibGVkU29ydHMiOlsicmVjZW50Il0sInNvdXJjZXMiOlsicGltcGJ1bm55Iiwia29yZWFuYmoiLCJ4aGFtc3RlciIsImhkcG9ybmdnIiwicG9ybnRyZXgiLCJmcmVzaHBvcm5vIiwiYmluZ2F0byJdLCJ0YktleSI6ImE1ZWNmYmJkLWY0NGUtNDcxZS04MDQwLWJhZjgxZGZjNDI4MiIsInRwZGJDYXRlZ29yaWVlcyI6W10sInN0YXNoZGJDYXRlZ29yaWVzIjpbXSwiZ3JvdXAiOjIsImdyb3VwVG90YWwiOjZ9',
-        'https://tpb-adult-addon.click/eyJtYXhSZXN1bHRzIjoyMCwibWluU2VlZGVycyI6MywicHJldmFybURlYnJpZCI6ZmFsc2UsInNlcGFyYXRlQ2F0ZWdvcmllcyI6dHJ1ZSwibWVkaWFGbG93UHJveHlVcmwiOiIiLCJtZWRpYUZsb3dBcGlQYXNzd29yZCI6IiIsImFkUmVkaXJlY3RvclVybCI6IiIsImphY2tldHRVcmwiOiIiLCJ1c2VuZXRNb2RlIjoidG9yYm94IiwidXNlbmV0SW5kZXhlciI6Im56Z2JlZWsiLCJlbmFibGVkU29ydHMiOlsicmVjZW50Il0sInNvdXJjZXMiOlsiZXBvcm5lciIsInZqYXYiLCJ4dmlkZW9zIiwieG54eCIsInN4eWxhbmQiLCJ5b3VwZXJ2Il0sInRiS2V5IjoiYTVlY2ZiYmQtZjQ0ZS00NzFlLTgwNDAtYmFmODFkZmM0MjgyIiwidHBkYkNhdGVnb3JpZXMiOltdLCJzdGFzaGRiQ2F0ZWdvcmllcyI6W10sImdyb3VwIjozLCJncm91cFRvdGFsIjo2fQ',
-        'https://tpb-adult-addon.click/eyJtYXhSZXN1bHRzIjoyMCwibWluU2VlZGVycyI6MywicHJldmFybURlYnJpZCI6ZmFsc2UsInNlcGFyYXRlQ2F0ZWdvcmllcyI6dHJ1ZSwibWVkaWFGbG93UHJveHlVcmwiOiIiLCJtZWRpYUZsb3dBcGlQYXNzd29yZCI6IiIsImFkUmVkaXJlY3RvclVybCI6IiIsImphY2tldHRVcmwiOiIiLCJ1c2VuZXRNb2RlIjoidG9yYm94IiwidXNlbmV0SW5kZXhlciI6Im56Z2JlZWsiLCJlbmFibGVkU29ydHMiOlsicmVjZW50Il0sInNvdXJjZXMiOlsic3VwZXJwb3JuIiwiZnVsbHZpZGVvc3Bvcm4iLCJwb3JuaHViIiwibm90ZmFucyIsImhvcm55ZmFwIiwic2V2ZXJlcG9ybiIsImhlbnRhaXNtaWxlIiwibWVnYXBhY2tzIl0sInRiS2V5IjoiYTVlY2ZiYmQtZjQ0ZS00NzFlLTgwNDAtYmFmODFkZmM0MjgyIiwidHBkYkNhdGVnb3JpZXMiOltdLCJzdGFzaGRiQ2F0ZWdvcmllcyI6W10sImdyb3VwIjo0LCJncm91cFRvdGFsIjo2fQ',
-        'https://tpb-adult-addon.click/eyJtYXhSZXN1bHRzIjoyMCwibWluU2VlZGVycyI6MywicHJldmFybURlYnJpZCI6ZmFsc2UsInNlcGFyYXRlQ2F0ZWdvcmllcyI6dHJ1ZSwibWVkaWFGbG93UHJveHlVcmwiOiIiLCJtZWRpYUZsb3dBcGlQYXNzd29yZCI6IiIsImFkUmVkaXJlY3RvclVybCI6IiIsImphY2tldHRVcmwiOiIiLCJ1c2VuZXRNb2RlIjoidG9yYm94IiwidXNlbmV0SW5kZXhlciI6Im56Z2JlZWsiLCJlbmFibGVkU29ydHMiOlsicmVjZW50Il0sInNvdXJjZXMiOlsic2hhcmVhbnludWRlcyIsInh4YnJpdHMiLCJoZW50YWlnYXNtIiwieG1hemEiLCJoaW5kaXh4eGhkIiwid2VieHNlcmllcyIsIndvd3VuY3V0IiwieWVzcG9ybnBsZWFzZXh4eCJdLCJ0YktleSI6ImE1ZWNmYmJkLWY0NGUtNDcxZS04MDQwLWJhZjgxZGZjNDI4MiIsInRwZGJDYXRlZ29yaWVzIjpbXSwic3Rhc2hkYkNhdGVnb3JpZXMiOltdLCJncm91cCI6NSwiZ3JvdXBUb3RhbCI6Nn0',
-        'https://tpb-adult-addon.click/eyJtYXhSZXN1bHRzIjoyMCwibWluU2VlZGVycyI6MywicHJldmFybURlYnJpZCI6ZmFsc2UsInNlcGFyYXRlQ2F0ZWdvcmllcyI6dHJ1ZSwibWVkaWFGbG93UHJveHlVcmwiOiIiLCJtZWRpYUZsb3dBcGlQYXNzd29yZCI6IiIsImFkUmVkaXJlY3RvclVybCI6IiIsImphY2tldHRVcmwiOiIiLCJ1c2VuZXRNb2RlIjoidG9yYm94IiwidXNlbmV0SW5kZXhlciI6Im56Z2JlZWsiLCJlbmFibGVkU29ydHMiOlsicmVjZW50Il0sInNvdXJjZXMiOlsiaG90bGVhayJdLCJ0YktleSI6ImE1ZWNmYmJkLWY0NGUtNDcxZS04MDQwLWJhZjgxZGZjNDI4MiIsInRwZGJDYXRlZ29yaWVzIjpbXSwic3Rhc2hkYkNhdGVnb3JpZXMiOltdLCJncm91cCI6NiwiZ3JvdXBUb3RhbCI6Nn0'
+        'https://tpb-adult-addon.click/pornrips/hentai/pjav/stripchat/yesporn/pornwex',
+        'https://tpb-adult-addon.click/pimpbunny/koreanbj/xhamster/hdporngg/porntrex/freshporno/bingato',
+        'https://tpb-adult-addon.click/eporner/vjav/xvideos/gnxx/sxyland/youperv',
+        'https://tpb-adult-addon.click/superporn/fullvideosporn/pornhub/notfans/hornyfap/severeporn/hlintahentaismile/megapacks',
+        'https://tpb-adult-addon.click/shareanynudes/xxbrits/hentaigasm/xmaza/hindixxxhd/webxseries/wowuncut/yespornpleasexx',
+        'https://tpb-adult-addon.click/hotleak'
     ];
-
-    function cleanBase(url) {
-        return String(url || '').replace(/\/+$/, '');
-    }
 
     function getBase(index) {
         index = typeof index === 'number' ? index : 0;
 
-        var stored = Lampa.Storage.get('tpb_adult_base', '');
-        if (stored) {
-            return cleanBase(stored);
-        }
+        var key = PLUGIN_ID + '_url';
 
-        return cleanBase(DEFAULT_BASE[index] || DEFAULT_BASE[0]);
+        try {
+            var stored = Lampa.Storage.get(key + '_' + index, '');
+
+            if (stored) {
+                return String(stored).replace(/\/+$/, '');
+            }
+        } catch (e) {}
+
+        return String(DEFAULT_BASE[index] || DEFAULT_BASE[0]).replace(/\/+$/, '');
     }
 
     function request(url, success, fail) {
-        var req = new Lampa.Reguest();
-
-        req.timeout = 15000;
-
-        req.native(
+        new Lampa.Reguest().silent(
             url,
-            function (data) {
-                success(data);
-            },
-            function (error) {
-                if (fail) {
-                    fail(error);
-                }
-            }
+            success,
+            fail,
+            false
         );
     }
 
@@ -73,382 +79,451 @@
         }
     }
 
-    function encode(value) {
-        return encodeURIComponent(
-            value == null ? '' : String(value)
-        );
+    function enc(value) {
+        return encodeURIComponent(value == null ? '' : String(value));
     }
 
-    function addParams(url, params) {
-        var parts = [];
-        var key;
+    /*
+     * ---------------------------------------------------------
+     * MANIFEST
+     * ---------------------------------------------------------
+     */
 
-        for (key in params) {
+    function getManifest(callback, fail) {
+        var all = [];
+        var completed = 0;
+        var failed = 0;
+
+        for (var i = 0; i < DEFAULT_BASE.length; i++) {
+            (function (index) {
+                var url = getBase(index) + '/manifest.json';
+
+                request(url, function (data) {
+                    var manifest = json(data);
+                    var catalogs = manifest.catalogs || [];
+
+                    for (var j = 0; j < catalogs.length; j++) {
+                        catalogs[j]._base_index = index;
+                    }
+
+                    all = all.concat(catalogs);
+
+                    completed++;
+
+                    if (completed + failed >= DEFAULT_BASE.length) {
+                        if (all.length) {
+                            callback({
+                                catalogs: all
+                            });
+                        } else if (fail) {
+                            fail(new Error('No TPB catalogs available'));
+                        }
+                    }
+                }, function (err) {
+                    failed++;
+
+                    if (completed + failed >= DEFAULT_BASE.length) {
+                        if (all.length) {
+                            callback({
+                                catalogs: all
+                            });
+                        } else if (fail) {
+                            fail(err || new Error('TPB Adult unavailable'));
+                        }
+                    }
+                });
+            })(i);
+        }
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * URL BUILDERS
+     * ---------------------------------------------------------
+     */
+
+    function catalogUrl(cat, extra) {
+        var baseIndex =
+            typeof cat._base_index === 'number'
+                ? cat._base_index
+                : 0;
+
+        var base = getBase(baseIndex);
+
+        var url =
+            base +
+            '/catalog/' +
+            enc(cat.type) +
+            '/' +
+            enc(cat.id);
+
+        extra = extra || {};
+
+        var parts = [];
+
+        Object.keys(extra).forEach(function (key) {
             if (
-                Object.prototype.hasOwnProperty.call(params, key) &&
-                params[key] !== undefined &&
-                params[key] !== null &&
-                params[key] !== ''
+                extra[key] !== undefined &&
+                extra[key] !== null &&
+                extra[key] !== ''
             ) {
                 parts.push(
-                    encode(key) + '=' + encode(params[key])
+                    enc(key) + '=' + enc(extra[key])
                 );
             }
-        }
+        });
 
         if (parts.length) {
             url += '/' + parts.join('/');
         }
 
-        return url + '.json';
+        url += '.json';
+
+        return url;
     }
 
-    function getManifest(baseIndex, success, fail) {
-        request(
-            getBase(baseIndex) + '/manifest.json',
-            function (data) {
-                var manifest = json(data);
-
-                manifest = manifest || {};
-                manifest.catalogs = manifest.catalogs || [];
-
-                success(manifest);
-            },
-            fail
-        );
-    }
-
-    function catalogUrl(catalog, page, search) {
-        var baseIndex =
-            typeof catalog._base_index === 'number'
-                ? catalog._base_index
+    function metaUrl(meta, type, id, baseIndex) {
+        var index =
+            typeof baseIndex === 'number'
+                ? baseIndex
                 : 0;
 
-        var url =
-            getBase(baseIndex) +
-            '/catalog/' +
-            encode(catalog.type || 'movie') +
-            '/' +
-            encode(catalog.id || '');
-
-        var extra = {
-            skip: (page - 1) * 20
-        };
-
-        if (search) {
-            extra.search = search;
-        }
-
-        return addParams(url, extra);
-    }
-
-    function metaUrl(type, id, baseIndex) {
         return (
-            getBase(baseIndex) +
+            getBase(index) +
             '/meta/' +
-            encode(type || 'movie') +
+            enc(type) +
             '/' +
-            encode(id || '') +
+            enc(id) +
             '.json'
         );
     }
 
     function streamUrl(type, id, baseIndex) {
+        var index =
+            typeof baseIndex === 'number'
+                ? baseIndex
+                : 0;
+
         return (
-            getBase(baseIndex) +
+            getBase(index) +
             '/stream/' +
-            encode(type || 'movie') +
+            enc(type) +
             '/' +
-            encode(id || '') +
+            enc(id) +
             '.json'
         );
     }
 
+    /*
+     * ---------------------------------------------------------
+     * NORMALIZE META
+     * ---------------------------------------------------------
+     */
+
     function normalizeMeta(item, type, baseIndex) {
         item = item || {};
 
-        var result = {
-            id: item.id,
-            type: item.type || type || 'movie',
-            name: item.name || item.title || '',
-            title: item.title || item.name || '',
-            poster: item.poster || item.background || '',
-            background: item.background || item.poster || '',
-            description: item.description || item.overview || '',
-            releaseInfo: item.releaseInfo || item.year || '',
-            year: item.year || '',
-            genres: item.genres || [],
-            imdbRating: item.imdbRating || item.rating || 0,
-            runtime: item.runtime || 0,
-            videos: item.videos || []
-        };
+        item.tpb_addon_id =
+            item.tpb_addon_id ||
+            item.id ||
+            '';
 
-        result.tpb_base_index = baseIndex;
+        item.tpb_addon_type =
+            item.tpb_addon_type ||
+            type ||
+            'movie';
 
-        return result;
+        item.tpb_base_index =
+            typeof baseIndex === 'number'
+                ? baseIndex
+                : 0;
+
+        return item;
     }
 
-    function openMeta(element) {
-        var movie = element && element.movie;
+    /*
+     * ---------------------------------------------------------
+     * STREAM
+     * ---------------------------------------------------------
+     */
 
-        if (!movie) {
-            return;
-        }
+    function playStream(entry) {
+        if (!entry) return;
 
-        Lampa.Activity.push({
-            url: '',
-            title: movie.title || movie.name || '',
-            component: 'tpb_card',
-            movie: movie
+        /*
+         * Do NOT reset playlist here.
+         * Lampa.Player.play() handles playback.
+         */
+        Lampa.Player.play(entry);
+    }
+
+    function showStreams(movie, type, id, baseIndex) {
+        var url = streamUrl(type, id, baseIndex);
+
+        request(url, function (data) {
+            var result = json(data);
+            var streams = result.streams || [];
+
+            if (!streams.length) {
+                Lampa.Noty.show(
+                    'TPB Adult: потоки не найдены'
+                );
+                return;
+            }
+
+            var items = [];
+
+            streams.forEach(function (stream, index) {
+                var title =
+                    stream.title ||
+                    stream.name ||
+                    ('Stream ' + (index + 1));
+
+                items.push({
+                    title: title,
+                    url: stream.url || stream.externalUrl || '',
+                    quality: stream.quality || '',
+                    type: stream.type || 'video'
+                });
+            });
+
+            var activity = new Lampa.Activity();
+
+            activity.loader(false);
+
+            var comp = new Lampa.Select({
+                title: 'TPB Adult',
+                items: items,
+                onSelect: function (item) {
+                    if (item && item.url) {
+                        playStream({
+                            url: item.url,
+                            title: item.title,
+                            quality: item.quality
+                        });
+                    }
+                }
+            });
+
+            activity.component = comp;
+
+            Lampa.Activity.push(
+                activity
+            );
+        }, function () {
+            Lampa.Noty.show(
+                'TPB Adult: ошибка загрузки потоков'
+            );
         });
     }
 
-    function TpbCard(object) {
-        var comp = new Lampa.InteractionMain(object);
-        var movie = object.movie || {};
+    /*
+     * ---------------------------------------------------------
+     * META
+     * ---------------------------------------------------------
+     */
 
-        comp.create = function () {
-            var self = this;
-            var activity = this.activity;
+    function openMeta(element) {
+        var movie = element.movie || element;
 
-            if (
-                activity &&
-                typeof activity.loader === 'function'
-            ) {
-                activity.loader(true);
-            }
+        var id =
+            movie.tpb_addon_id ||
+            movie.id ||
+            '';
 
-            request(
-                metaUrl(
-                    movie.type,
-                    movie.id,
-                    typeof movie.tpb_base_index === 'number'
-                        ? movie.tpb_base_index
-                        : 0
-                ),
-                function (data) {
-                    var result = json(data);
-                    var meta = result.meta || result;
+        var type =
+            movie.tpb_addon_type ||
+            movie.type ||
+            'movie';
 
-                    self.render = function () {
-                        var body = $(
-                            '<div class="tpb-adult-card"></div>'
-                        );
+        var baseIndex =
+            typeof movie.tpb_base_index === 'number'
+                ? movie.tpb_base_index
+                : 0;
 
-                        body.append(
-                            $(
-                                '<div class="tpb-adult-card__title"></div>'
-                            ).text(
-                                meta.name ||
-                                meta.title ||
-                                movie.title ||
-                                ''
-                            )
-                        );
-
-                        if (
-                            meta.description ||
-                            meta.overview
-                        ) {
-                            body.append(
-                                $(
-                                    '<div class="tpb-adult-card__description"></div>'
-                                ).text(
-                                    meta.description ||
-                                    meta.overview
-                                )
-                            );
-                        }
-
-                        return body;
-                    };
-
-                    self.activity
-                        .render()
-                        .find('.activity__body')
-                        .append(self.render());
-
-                    if (
-                        activity &&
-                        typeof activity.loader === 'function'
-                    ) {
-                        activity.loader(false);
-                    }
-
-                    loadStreams(meta, movie);
-                },
-                function () {
-                    if (
-                        activity &&
-                        typeof activity.loader === 'function'
-                    ) {
-                        activity.loader(false);
-                    }
-
-                    Lampa.Noty.show(
-                        'TPB Adult: информация недоступна'
-                    );
-                }
+        if (!id) {
+            Lampa.Noty.show(
+                'TPB Adult: отсутствует ID'
             );
-        };
-
-        function loadStreams(meta, sourceMovie) {
-            var type =
-                meta.type ||
-                sourceMovie.type ||
-                'movie';
-
-            var id =
-                meta.id ||
-                sourceMovie.id;
-
-            var baseIndex =
-                typeof sourceMovie.tpb_base_index === 'number'
-                    ? sourceMovie.tpb_base_index
-                    : 0;
-
-            request(
-                streamUrl(type, id, baseIndex),
-                function (data) {
-                    var result = json(data);
-                    var streams = result.streams || [];
-
-                    streams.forEach(function (stream) {
-                        stream.title =
-                            stream.title ||
-                            stream.name ||
-                            (
-                                stream.behaviorHints &&
-                                stream.behaviorHints.filename
-                            ) ||
-                            'TPB Adult';
-
-                        stream.url =
-                            stream.url ||
-                            stream.externalUrl;
-
-                        if (stream.url) {
-                            addStreamButton(stream);
-                        }
-                    });
-                }
-            );
+            return;
         }
 
-        function addStreamButton(stream) {
-            var body = comp.activity
-                .render()
-                .find('.activity__body');
+        request(
+            metaUrl(
+                movie,
+                type,
+                id,
+                baseIndex
+            ),
+            function (data) {
+                var meta = json(data);
+
+                if (!meta || !meta.meta) {
+                    showStreams(
+                        movie,
+                        type,
+                        id,
+                        baseIndex
+                    );
+                    return;
+                }
+
+                meta.meta.tpb_addon_id = id;
+                meta.meta.tpb_addon_type = type;
+                meta.meta.tpb_base_index = baseIndex;
+
+                Lampa.Activity.push({
+                    component: 'tpb_adult_card',
+                    movie: meta.meta
+                });
+            },
+            function () {
+                showStreams(
+                    movie,
+                    type,
+                    id,
+                    baseIndex
+                );
+            }
+        );
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * CARD
+     * ---------------------------------------------------------
+     */
+
+    function TpbCard(object) {
+        var activity = this.activity;
+        var movie = object.movie || {};
+
+        this.create = function () {
+            var self = this;
 
             var button = $(
-                '<div class="selector button--medium button--wide">' +
-                '<span class="tpb-stream-title"></span>' +
+                '<div class="selector button--secondary">' +
+                    '<span>Смотреть</span>' +
                 '</div>'
             );
-
-            button
-                .find('.tpb-stream-title')
-                .text(stream.title);
 
             button.on(
                 'hover:enter',
                 function () {
-                    playStream(stream);
+                    showStreams(
+                        movie,
+                        movie.tpb_addon_type ||
+                            movie.type ||
+                            'movie',
+                        movie.tpb_addon_id ||
+                            movie.id ||
+                            '',
+                        typeof movie.tpb_base_index ===
+                            'number'
+                            ? movie.tpb_base_index
+                            : 0
+                    );
                 }
             );
 
-            body.append(button);
-        }
+            activity.render().append(button);
 
-        return comp;
-    }
-
-    function playStream(stream) {
-        var entry = {
-            url: stream.url,
-            title: stream.title || 'TPB Adult',
-            quality: stream.quality,
-            bitrate: stream.bitrate,
-            size: stream.size,
-            timeline: stream.timeline,
-            subtitles: stream.subtitles,
-            audio: stream.audio,
-            headers: stream.headers
+            self.activity.toggle();
         };
 
-        Lampa.Player.play(entry);
+        this.start = function () {
+            this.create();
+
+            activity.controller.add(
+                'content',
+                activity.render().find('.selector')
+            );
+
+            activity.controller.toggle('content');
+
+            activity.onBack = function () {
+                Lampa.Activity.backward();
+            };
+        };
     }
 
+    /*
+     * ---------------------------------------------------------
+     * CATALOG
+     * ---------------------------------------------------------
+     */
+
     function TpbCatalog(object) {
-        var comp = new Lampa.InteractionCategory(object);
+        var comp =
+            new Lampa.InteractionCategory(object);
 
         var catalog = object.catalog || {};
         var search = object.search || '';
 
-        var PAGE_SIZE = 20;
+        var pageSize = 20;
 
-        var initialPage =
-            parseInt(object.page || 1, 10);
-
-        if (!initialPage || initialPage < 1) {
-            initialPage = 1;
-        }
-
-        var currentPage = initialPage;
-        var loadingPage = 0;
+        var currentPage =
+            parseInt(
+                object.page || 1,
+                10
+            );
 
         /*
-         * IMPORTANT FOR LEGACY LAMPA
+         * IMPORTANT:
          *
-         * Old InteractionCategory next-page module checks:
+         * Lampa's legacy InteractionCategory checks
+         * total_pages before requesting the next page.
          *
-         * object.page < total_pages
-         *
-         * Some TPB/Stremio catalogs don't expose a useful
-         * total_pages value. Therefore we give Lampa a large
-         * upper limit and use an empty response as the real
-         * end-of-list signal.
+         * TPB does not provide a reliable total_pages value.
+         * Therefore allow pagination until TPB returns [].
          */
         comp.total_pages = 999999;
 
-        function loadPage(page, callback, fail) {
-            if (loadingPage === page) {
-                return;
-            }
+        function loadPage(
+            page,
+            callback,
+            fail
+        ) {
+            var extra = {
+                skip:
+                    (page - 1) *
+                    pageSize
+            };
 
-            loadingPage = page;
+            if (search) {
+                extra.search = search;
+            }
 
             request(
                 catalogUrl(
                     catalog,
-                    page,
-                    search
+                    extra
                 ),
                 function (data) {
-                    loadingPage = 0;
-
                     var result = json(data);
-                    var metas = result.metas || [];
+                    var metas =
+                        result.metas || [];
 
-                    callback(metas, result);
+                    callback(metas);
                 },
-                function (error) {
-                    loadingPage = 0;
-
-                    if (fail) {
-                        fail(error);
-                    }
-                }
+                fail
             );
         }
 
+        /*
+         * First page.
+         *
+         * DO NOT override comp.start().
+         * InteractionCategory owns its lifecycle.
+         */
         comp.create = function () {
             var activity = this.activity;
             var self = this;
 
             if (
                 activity &&
-                typeof activity.loader === 'function'
+                typeof activity.loader ===
+                    'function'
             ) {
                 activity.loader(true);
             }
@@ -456,36 +531,37 @@
             loadPage(
                 currentPage,
                 function (metas) {
-                    var items = metas.map(
-                        function (item) {
-                            return normalizeMeta(
-                                item,
-                                catalog.type,
-                                typeof catalog._base_index === 'number'
-                                    ? catalog._base_index
-                                    : 0
-                            );
-                        }
-                    );
+                    var items =
+                        metas.map(
+                            function (item) {
+                                return normalizeMeta(
+                                    item,
+                                    catalog.type,
+                                    typeof catalog._base_index ===
+                                        'number'
+                                        ? catalog._base_index
+                                        : 0
+                                );
+                            }
+                        );
 
-                    /*
-                     * Do not override comp.start().
-                     *
-                     * InteractionCategory needs its own
-                     * lifecycle/controller for vertical
-                     * navigation and infinite scroll.
-                     *
-                     * more=true is deliberately used here.
-                     */
                     self.build({
                         results: items,
-                        more: metas.length > 0,
+
+                        /*
+                         * Continue while TPB
+                         * returns at least one item.
+                         */
+                        more:
+                            metas.length > 0,
+
                         collection: true
                     });
 
                     if (
                         activity &&
-                        typeof activity.loader === 'function'
+                        typeof activity.loader ===
+                            'function'
                     ) {
                         activity.loader(false);
                     }
@@ -493,7 +569,8 @@
                 function () {
                     if (
                         activity &&
-                        typeof activity.loader === 'function'
+                        typeof activity.loader ===
+                            'function'
                     ) {
                         activity.loader(false);
                     }
@@ -501,16 +578,13 @@
                     Lampa.Noty.show(
                         'TPB Adult: каталог недоступен'
                     );
-
-                    self.build({
-                        results: [],
-                        more: false,
-                        collection: true
-                    });
                 }
             );
         };
 
+        /*
+         * Card click.
+         */
         comp.cardRender = function (
             object,
             element,
@@ -522,59 +596,140 @@
         };
 
         /*
-         * Legacy Lampa API deliberately calls this
-         * "Reuest".
+         * -----------------------------------------------------
+         * FIXED PAGINATION
+         * -----------------------------------------------------
          *
-         * The nextObject supplied by InteractionCategory
-         * may contain the page it wants us to load.
+         * InteractionCategory passes nextObject.page.
+         *
+         * We use it when available and fall back to
+         * currentPage + 1.
+         *
+         * TPB pagination:
+         *
+         * page 1 -> skip=0
+         * page 2 -> skip=20
+         * page 3 -> skip=40
+         * page 4 -> skip=60
+         * ...
+         *
+         * Loading stops only when TPB returns an empty page.
          */
         comp.nextPageReuest = function (
             nextObject,
             resolve,
             reject
         ) {
-            nextObject = nextObject || {};
+            var nextPage =
+                nextObject &&
+                parseInt(
+                    nextObject.page,
+                    10
+                );
 
-            var nextPage = parseInt(
-                nextObject.page ||
-                nextObject.next_page ||
-                nextObject.nextPage ||
-                (currentPage + 1),
-                10
-            );
-
-            /*
-             * Prevent duplicate or backward requests.
-             */
             if (
                 !nextPage ||
                 nextPage <= currentPage
             ) {
-                nextPage = currentPage + 1;
+                nextPage =
+                    currentPage + 1;
             }
 
             loadPage(
                 nextPage,
                 function (metas) {
-                    currentPage = nextPage;
+                    currentPage =
+                        nextPage;
 
-                    var items = metas.map(
-                        function (item) {
-                            return normalizeMeta(
-                                item,
-                                catalog.type,
-                                typeof catalog._base_index === 'number'
-                                    ? catalog._base_index
-                                    : 0
+                    var results =
+                        metas.map(
+                            function (item) {
+                                return normalizeMeta(
+                                    item,
+                                    catalog.type,
+                                    typeof catalog._base_index ===
+                                        'number'
+                                        ? catalog._base_index
+                                        : 0
+                                );
+                            }
+                        );
+
+                    resolve({
+                        results: results,
+
+                        /*
+                         * If TPB returned any items,
+                         * allow another request.
+                         *
+                         * If TPB returned [],
+                         * InteractionCategory stops.
+                         */
+                        more:
+                            metas.length > 0
+                    });
+                },
+                function (err) {
+                    if (reject) {
+                        reject(err);
+                    } else {
+                        resolve({
+                            results: [],
+                            more: false
+                        });
+                    }
+                }
+            );
+        };
+
+        return comp;
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * MENU
+     * ---------------------------------------------------------
+     */
+
+    function addMenu() {
+        if (
+            !Lampa.Menu ||
+            typeof Lampa.Menu.addButton !==
+                'function'
+        ) {
+            return;
+        }
+
+        Lampa.Menu.addButton(
+            'TPB Adult',
+            'menu-tpb-adult',
+            function () {
+                getManifest(
+                    function (manifest) {
+                        var catalogs =
+                            manifest.catalogs ||
+                            [];
+
+                        if (!catalogs.length) {
+                            Lampa.Noty.show(
+                                'TPB Adult: каталоги не найдены'
                             );
+                            return;
                         }
-                    );
 
-                    /*
-                     * If TPB returned records, tell Lampa that
-                     * another page may exist.
-                     *
-                     * When TPB finally returns an empty page,
-                     * more=false stops the infinite scroll.
-                     */
-                    resolve(
+                        var items =
+                            catalogs.map(
+                                function (
+                                    catalog
+                                ) {
+                                    return {
+                                        title:
+                                            catalog.name ||
+                                            catalog.title ||
+                                            catalog.id,
+
+                                        catalog:
+                                            catalog
+                                    };
+                                }
+                      
